@@ -112,6 +112,9 @@ price data, where the dominant signal really is "tomorrow looks like today."
 Directional accuracy near 50% means no edge beyond chance; consistently above
 ~53% would suggest a weak but real signal. **Not investment advice.**
 
+![Test set predictions](outputs/figures/predictions.png)
+![30-day forecast](outputs/figures/forecast.png)
+
 ## Deployment
 See [DEPLOY.md](DEPLOY.md) for Hugging Face Spaces and Streamlit Community Cloud.
 
