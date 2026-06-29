@@ -34,8 +34,8 @@ def build_dataset(df, lookback=20, train_pct=0.70, val_pct=0.15, features=FEATUR
     d = engineer(df)
     if len(d) < lookback + 10:
         raise ValueError(
-            f"Yetersiz veri ({len(d)} satır). Ticker veya tarih aralığı geçersiz olabilir, "
-            f"ya da lookback ({lookback}) için yeterli geçmiş veri yok."
+            f"Not enough data ({len(d)} rows). The ticker or date range may be invalid, "
+            f"or there isn't enough history for the lookback ({lookback})."
         )
     feat = d[features].values.astype("float32")
     ret = d["ret"].values.astype("float32")

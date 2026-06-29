@@ -16,7 +16,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODELS_DIR = os.path.join(ROOT, "outputs", "models")
 
 st.set_page_config(page_title="Stock Price Prediction", layout="wide")
-st.title("Hisse Fiyat Tahmini: RNN / LSTM / GRU")
+st.title("Stock Price Prediction: RNN / LSTM / GRU")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -45,19 +45,19 @@ def try_load_pretrained(kind, n_feat, ticker, start, end, lookback, hidden, laye
     return model
 
 with st.sidebar:
-    st.header("Ayarlar")
+    st.header("Settings")
     ticker = st.text_input("Ticker", "AMZN").upper().strip()
-    start = st.text_input("Başlangıç", "2010-01-01")
-    end = st.text_input("Bitiş", "2023-01-01")
+    start = st.text_input("Start date", "2010-01-01")
+    end = st.text_input("End date", "2023-01-01")
     kind = st.selectbox("Model", ["gru", "lstm", "rnn"])
     lookback = st.slider("Lookback", 10, 60, 20, step=5)
     epochs = st.slider("Epochs", 50, 400, 200, step=50)
-    horizon = st.slider("Forecast (gün)", 5, 60, 30, step=5)
-    st.subheader("Model mimarisi")
+    horizon = st.slider("Forecast (days)", 5, 60, 30, step=5)
+    st.subheader("Model architecture")
     hidden = st.slider("Hidden size", 8, 128, 32, step=8)
-    layers = st.slider("Layer sayısı", 1, 3, 2)
+    layers = st.slider("Layers", 1, 3, 2)
     lr = st.select_slider("Learning rate", [0.1, 0.05, 0.01, 0.005, 0.001], value=0.01)
-    run = st.button("Eğit ve Tahmin Et", type="primary")
+    run = st.button("Train & Predict", type="primary")
 
 
 @st.cache_data(show_spinner=False)
@@ -67,33 +67,33 @@ def load_data(ticker, start, end, lookback):
 
 
 if not run:
-    st.info("Soldan parametreleri seç ve Eğit ve Tahmin Et'e bas.")
+    st.info("Set the parameters on the left and click Train & Predict.")
     st.stop()
 
 try:
-    with st.spinner("Veri indiriliyor..."):
+    with st.spinner("Downloading data..."):
         data = load_data(ticker, start, end, lookback)
 
-    min_rows = lookback + 60  # SMA50 penceresi + en az bir lookback penceresi
+    min_rows = lookback + 60  # SMA50 window + at least one lookback window
     if len(data["df"]) < min_rows:
         st.error(
-            f"'{ticker}' için yeterli veri yok (yalnızca {len(data['df'])} satır, en az {min_rows} gerekiyor). "
-            "Ticker'ı, tarih aralığını veya lookback değerini kontrol et."
+            f"Not enough data for '{ticker}' (only {len(data['df'])} rows, need at least {min_rows}). "
+            "Check the ticker, the date range, or lower the lookback value."
         )
         st.stop()
     if len(data["X_tr"]) == 0 or len(data["X_val"]) == 0 or len(data["X_te"]) == 0:
-        st.error("Veri seti train/val/test olarak bölünemiyor. Tarih aralığını genişlet.")
+        st.error("The dataset can't be split into train/val/test. Widen the date range.")
         st.stop()
 
     n_feat = len(data["features"])
-    st.success(f"{ticker}: {len(data['df'])} gün, {n_feat} özellik")
+    st.success(f"{ticker}: {len(data['df'])} days, {n_feat} features")
 
     pretrained = try_load_pretrained(kind, n_feat, ticker, start, end, lookback, hidden, layers, device)
     if pretrained is not None:
-        st.info(f"Önceden eğitilmiş {kind.upper()} modeli kullanılıyor (parametreler eşleşti).")
+        st.info(f"Using the pretrained {kind.upper()} model (parameters match).")
         model = pretrained
     else:
-        with st.spinner(f"{kind.upper()} eğitiliyor..."):
+        with st.spinner(f"Training {kind.upper()}..."):
             set_seed(42)
             model = make_model(kind, input_dim=n_feat, hidden=hidden, layers=layers)
             model, hist = train_model(model, data, epochs=epochs, lr=lr, device=device)
@@ -107,17 +107,17 @@ try:
     c1.metric("RMSE", f"{m['RMSE']:.2f}")
     c2.metric("MAE", f"{m['MAE']:.2f}")
     c3.metric("MAPE", f"{m['MAPE_%']:.2f}%")
-    c4.metric("Yön doğruluğu", f"{da:.1f}%")
+    c4.metric("Directional accuracy", f"{da:.1f}%")
 
     fig, ax = plt.subplots(figsize=(11, 4))
     ax.plot(y_true.ravel(), label="Actual", lw=2)
     ax.plot(y_pred.ravel(), label=f"{kind.upper()} pred", alpha=0.8)
-    ax.set_title(f"{ticker} test seti")
+    ax.set_title(f"{ticker} test set")
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
 
-    with st.spinner("Forecast hesaplanıyor..."):
+    with st.spinner("Computing forecast..."):
         future = recursive_forecast(model, data, lookback, steps=horizon, device=device)
 
     resid_std = float(np.std(y_true.ravel() - y_pred.ravel()))
@@ -127,20 +127,20 @@ try:
     future_x = range(len(hist_close), len(hist_close) + horizon)
     fig2, ax2 = plt.subplots(figsize=(11, 4))
     ax2.plot(range(len(hist_close)), hist_close, label="History")
-    ax2.plot(future_x, future, "--", label=f"{horizon} gün forecast")
-    ax2.fill_between(future_x, future - band, future + band, alpha=0.2, label="~%95 belirsizlik bandı")
+    ax2.plot(future_x, future, "--", label=f"{horizon}-day forecast")
+    ax2.fill_between(future_x, future - band, future + band, alpha=0.2, label="~95% uncertainty band")
     ax2.set_title(f"{ticker} {kind.upper()} forecast")
     ax2.legend()
     ax2.grid(alpha=0.3)
     st.pyplot(fig2)
 
-    st.caption("Eğitim amaçlıdır, yatırım tavsiyesi değildir.")
+    st.caption("For educational purposes only. Not investment advice.")
 
 except ValueError as e:
-    st.error(f"Geçersiz parametre veya ticker: {e}")
+    st.error(f"Invalid parameter or ticker: {e}")
 except Exception as e:
     st.error(
-        f"Beklenmeyen bir hata oluştu ({type(e).__name__}): {e}\n\n"
-        "Ticker'ın doğru olduğundan, tarih aralığının geçerli olduğundan ve "
-        "internet bağlantısının çalıştığından emin ol."
+        f"An unexpected error occurred ({type(e).__name__}): {e}\n\n"
+        "Make sure the ticker is valid, the date range is correct, and "
+        "your internet connection is working."
     )
