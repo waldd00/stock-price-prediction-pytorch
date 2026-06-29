@@ -1,0 +1,11 @@
+{
+  "ticker": "AMZN",
+  "start": "2010-01-01",
+  "end": "2023-01-01",
+  "lookback": 20,
+  "hidden": 32,
+  "layers": 2,
+  "epochs": 300,
+  "lr": 0.01,
+  "patience": 25
+}
