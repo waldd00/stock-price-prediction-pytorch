@@ -1,8 +1,8 @@
 import json
 import os
 import sys
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 import streamlit as st
 import torch
 
@@ -15,8 +15,9 @@ from src.forecast import recursive_forecast
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODELS_DIR = os.path.join(ROOT, "outputs", "models")
 
-st.set_page_config(page_title="Stock Price Prediction", layout="wide")
-st.title("Stock Price Prediction: RNN / LSTM / GRU")
+st.set_page_config(page_title="Stock Price Prediction", page_icon="📈", layout="wide")
+st.title("📈 Stock Price Prediction: RNN / LSTM / GRU")
+st.caption("Predicts the next-day **log-return** and reconstructs price as `price[t] * exp(return)` — not a raw-price copy of yesterday.")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -44,20 +45,23 @@ def try_load_pretrained(kind, n_feat, ticker, start, end, lookback, hidden, laye
     model.eval()
     return model
 
+
 with st.sidebar:
-    st.header("Settings")
-    ticker = st.text_input("Ticker", "AMZN").upper().strip()
+    st.header("⚙️ Settings")
+    ticker = st.text_input("Ticker", "AMZN", help="Any symbol supported by Yahoo Finance, e.g. AMZN, AAPL, MSFT.").upper().strip()
     start = st.text_input("Start date", "2010-01-01")
     end = st.text_input("End date", "2023-01-01")
     kind = st.selectbox("Model", ["gru", "lstm", "rnn"])
-    lookback = st.slider("Lookback", 10, 60, 20, step=5)
-    epochs = st.slider("Epochs", 50, 400, 200, step=50)
-    horizon = st.slider("Forecast (days)", 5, 60, 30, step=5)
-    st.subheader("Model architecture")
-    hidden = st.slider("Hidden size", 8, 128, 32, step=8)
-    layers = st.slider("Layers", 1, 3, 2)
+    lookback = st.slider("Lookback", 10, 60, 20, step=5, help="How many past days the model sees to predict the next one.")
+    epochs = st.slider("Epochs", 50, 400, 200, step=50, help="Training stops early if validation loss stops improving.")
+    horizon = st.slider("Forecast (days)", 5, 60, 30, step=5, help="How many days to forecast recursively into the future.")
+    st.divider()
+    st.subheader("🧠 Model architecture")
+    hidden = st.slider("Hidden size", 8, 128, 32, step=8, help="Number of units in each recurrent layer.")
+    layers = st.slider("Layers", 1, 3, 2, help="Number of stacked recurrent layers.")
     lr = st.select_slider("Learning rate", [0.1, 0.05, 0.01, 0.005, 0.001], value=0.01)
-    run = st.button("Train & Predict", type="primary")
+    st.divider()
+    run = st.button("🚀 Train & Predict", type="primary", use_container_width=True)
 
 
 @st.cache_data(show_spinner=False)
@@ -67,7 +71,24 @@ def load_data(ticker, start, end, lookback):
 
 
 if not run:
-    st.info("Set the parameters on the left and click Train & Predict.")
+    st.info("Set the parameters on the left and click **Train & Predict**.")
+    with st.expander("ℹ️ About this project", expanded=True):
+        st.markdown(
+            """
+Most beginner tutorials feed raw closing prices into an RNN and predict the next
+raw price — on a trending series that mostly teaches the model to copy yesterday's
+value forward. This project instead predicts the **next-day log-return**, which is
+approximately stationary, and reconstructs price as `price[t+1] = price[t] * exp(return)`.
+
+- Chronological train/val/test split — scalers fit on train only, no leakage.
+- Early stopping on validation loss, seeded for reproducible runs.
+- Hitting the defaults (AMZN, 2010–2023, lookback 20) loads **pretrained weights**
+  instantly instead of retraining.
+- Multi-step recursive forecast with a residual-based ~95% uncertainty band.
+
+[Source on GitHub](https://github.com/waldd00/stock-price-prediction-pytorch) — not investment advice.
+"""
+        )
     st.stop()
 
 try:
@@ -103,38 +124,77 @@ try:
     m = metrics(y_true, y_pred)
     da = directional_accuracy(y_true, y_pred, data["anchor_te"])
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("RMSE", f"{m['RMSE']:.2f}")
-    c2.metric("MAE", f"{m['MAE']:.2f}")
-    c3.metric("MAPE", f"{m['MAPE_%']:.2f}%")
-    c4.metric("Directional accuracy", f"{da:.1f}%")
+    tab_results, tab_forecast, tab_about = st.tabs(["📊 Test Results", "🔮 Forecast", "ℹ️ About"])
 
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(y_true.ravel(), label="Actual", lw=2)
-    ax.plot(y_pred.ravel(), label=f"{kind.upper()} pred", alpha=0.8)
-    ax.set_title(f"{ticker} test set")
-    ax.legend()
-    ax.grid(alpha=0.3)
-    st.pyplot(fig)
+    with tab_results:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📐 RMSE", f"{m['RMSE']:.2f}")
+        c2.metric("📏 MAE", f"{m['MAE']:.2f}")
+        c3.metric("📊 MAPE", f"{m['MAPE_%']:.2f}%")
+        c4.metric("🎯 Directional accuracy", f"{da:.1f}%")
 
-    with st.spinner("Computing forecast..."):
-        future = recursive_forecast(model, data, lookback, steps=horizon, device=device)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(y=y_true.ravel(), name="Actual", line=dict(width=2)))
+        fig.add_trace(go.Scatter(y=y_pred.ravel(), name=f"{kind.upper()} pred", line=dict(width=1.5)))
+        fig.update_layout(
+            title=f"{ticker} test set: actual vs predicted",
+            xaxis_title="Test set day index", yaxis_title="Price",
+            hovermode="x unified", template="plotly_white", height=450,
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    resid_std = float(np.std(y_true.ravel() - y_pred.ravel()))
-    band = 1.96 * resid_std * np.sqrt(np.arange(1, horizon + 1))
+    with tab_forecast:
+        with st.spinner("Computing forecast..."):
+            future = recursive_forecast(model, data, lookback, steps=horizon, device=device)
 
-    hist_close = data["df"]["Close"].values[-120:]
-    future_x = range(len(hist_close), len(hist_close) + horizon)
-    fig2, ax2 = plt.subplots(figsize=(11, 4))
-    ax2.plot(range(len(hist_close)), hist_close, label="History")
-    ax2.plot(future_x, future, "--", label=f"{horizon}-day forecast")
-    ax2.fill_between(future_x, future - band, future + band, alpha=0.2, label="~95% uncertainty band")
-    ax2.set_title(f"{ticker} {kind.upper()} forecast")
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-    st.pyplot(fig2)
+        resid_std = float(np.std(y_true.ravel() - y_pred.ravel()))
+        band = 1.96 * resid_std * np.sqrt(np.arange(1, horizon + 1))
 
-    st.caption("For educational purposes only. Not investment advice.")
+        hist_close = data["df"]["Close"].values[-120:]
+        hist_x = list(range(len(hist_close)))
+        future_x = list(range(len(hist_close), len(hist_close) + horizon))
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=hist_x, y=hist_close, name="History", line=dict(width=2)))
+        fig2.add_trace(go.Scatter(x=future_x, y=future, name=f"{horizon}-day forecast", line=dict(width=2, dash="dash")))
+        fig2.add_trace(go.Scatter(
+            x=future_x + future_x[::-1], y=list(future + band) + list((future - band)[::-1]),
+            fill="toself", fillcolor="rgba(37, 99, 235, 0.15)", line=dict(width=0),
+            name="~95% uncertainty band", hoverinfo="skip",
+        ))
+        fig2.update_layout(
+            title=f"{ticker} {kind.upper()} forecast",
+            xaxis_title="Day index", yaxis_title="Price",
+            hovermode="x unified", template="plotly_white", height=450,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+        st.caption("The band widens with √(days ahead) to reflect compounding forecast error in the recursive multi-step prediction.")
+
+    with tab_about:
+        st.markdown(
+            """
+### Why log-returns, not raw price?
+Raw closing prices drift with the trend, so a model fed raw prices mostly learns to
+copy yesterday's value forward — accurate-looking on a chart, but with no real signal,
+and it extrapolates badly once the trend breaks. Log-returns are approximately
+stationary, which is what these models actually need to learn something beyond
+"yesterday's price."
+
+### Pretrained model reuse
+Hitting the default parameters (AMZN, 2010-01-01–2023-01-01, lookback 20, hidden 32,
+2 layers) loads the pretrained weights from `outputs/models/` instead of retraining
+from scratch. Change any of those and the app trains a fresh model.
+
+### Honest results
+The naive baseline (predict tomorrow = today) performs about as well as these models
+on RMSE/MAE — expected for daily price data. Directional accuracy near 50% means no
+edge beyond chance.
+
+**For educational purposes only. Not investment advice.**
+
+[Source code on GitHub](https://github.com/waldd00/stock-price-prediction-pytorch)
+"""
+        )
 
 except ValueError as e:
     st.error(f"Invalid parameter or ticker: {e}")
